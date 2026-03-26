@@ -23,7 +23,7 @@ st.markdown("---")
 @st.cache_data
 def load_data():
     """Carga los datos desde el archivo CSV"""
-    df = pd.read_csv('licitaciones.csv', encoding='utf-8')
+    df = pd.read_csv('proyectos_guatecompras.csv', encoding='utf-8')
     
     # Limpiar nombres de columnas
     df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
