@@ -271,6 +271,59 @@ if not df_ofertas.empty:
     )
     st.plotly_chart(fig_ofertas, use_container_width=True)
 
+
+
+# ============================================
+# MAPAS
+# ============================================
+st.header("🗺️ Visualización Geográfica")
+
+try:
+    import folium
+    from streamlit_folium import folium_static
+    from folium.plugins import MarkerCluster, HeatMap
+    
+    # Proyectos con coordenadas
+    proyectos_con_coords = df_filtrado.dropna(subset=['LATITUD', 'LONGITUD']).copy()
+    
+    if len(proyectos_con_coords) > 0:
+        center_lat = proyectos_con_coords['LATITUD'].mean()
+        center_lon = proyectos_con_coords['LONGITUD'].mean()
+        
+        tab1, tab2 = st.tabs(["📍 Mapa de Proyectos", "🔥 Mapa de Calor"])
+        
+        with tab1:
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=8, control_scale=True)
+            marker_cluster = MarkerCluster().add_to(m)
+            
+            for _, row in proyectos_con_coords.iterrows():
+                popup = f"""
+                <b>{row['NOMBRE_PROYECTO']}</b><br>
+                <b>Institución:</b> {row['INSTITUCION']}<br>
+                <b>Ubicación:</b> {row['MUNICIPIO']}, {row['DEPARTAMENTO']}<br>
+                <b>Avance:</b> {row['AVANCE_FISICO']:.1f}%<br>
+                <b>Monto:</b> Q{row['MONTO_MODIFICADO']:,.2f}<br>
+                <b>Empresa:</b> {row['EMPRESA']}<br>
+                <b>Observaciones:</b> {str(row['OBSERVACIONES'])[:100]}...
+                """
+                folium.Marker(
+                    location=[row['LATITUD'], row['LONGITUD']],
+                    popup=folium.Popup(popup, max_width=300),
+                    tooltip=row['NOMBRE_PROYECTO']
+                ).add_to(marker_cluster)
+            
+            folium_static(m, width=1200, height=500)
+            
+        with tab2:
+            heat_data = [[row['LATITUD'], row['LONGITUD']] for _, row in proyectos_con_coords.iterrows()]
+            heat_map = folium.Map(location=[center_lat, center_lon], zoom_start=8)
+            HeatMap(heat_data, radius=15, blur=10).add_to(heat_map)
+            folium_static(heat_map, width=1200, height=500)
+    else:
+        st.info("ℹ️ No hay proyectos con coordenadas válidas")
+        
+except ImportError:
+    st.warning("⚠️ Librerías de mapas no instaladas")
 # ============================================
 # TABLA DE DATOS
 # ============================================
