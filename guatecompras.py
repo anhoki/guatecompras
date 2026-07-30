@@ -1,1099 +1,561 @@
+# dashboard_licitaciones.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import folium
-from folium.plugins import MarkerCluster, HeatMap
-from streamlit_folium import folium_static
-import json
+from datetime import datetime
 import numpy as np
+import json
 
-# ============ CONFIGURACIÓN ============
+
+
+# Configuración de la página
 st.set_page_config(
-    page_title="Monitoreo Humanitario - Centroamérica",
-    page_icon="🌍",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Dashboard de Licitaciones - Guatemala",
+    page_icon="📊",
+    layout="wide"
 )
 
-# ============ ESTILOS CSS ============
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    .metric-card {
-        background: white;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        border-left: 6px solid #2ecc71;
-        transition: transform 0.2s;
-        margin-bottom: 15px;
-    }
-    .metric-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-    }
-    h1, h2, h3 {
-        color: #2c3e50 !important;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0 24px;
-        background-color: white;
-        border-radius: 8px 8px 0 0;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1a5276;
-        color: white !important;
-    }
-    .folium-map {
-        border-radius: 15px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        margin-bottom: 20px;
-    }
-    .programa-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-right: 8px;
-    }
-    .acnur-badge {
-        background-color: #1a5276;
-        color: white;
-    }
-    .pma-badge {
-        background-color: #27ae60;
-        color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Título principal
+st.title("📊 Dashboard de Licitaciones Públicas")
+st.markdown("---")
 
-# ============ DATOS DE LOS PROYECTOS ============
-
-# GT - Guatemala
-data_gt = {
-    'categoria': [
-        'WASH', 'WASH',
-        'Protección Niñez', 'Protección Niñez',
-        'VBG',
-        'Seguridad Alimentaria', 'Seguridad Alimentaria', 'Seguridad Alimentaria'
-    ],
-    'indicador': [
-        'Kits de WASH/higiene distribuidos',
-        'Personas que reciben mensajes de WASH',
-        'Niños/as que reciben apoyo de protección',
-        'Personas en espacios amigables',
-        'Staff de socios capacitados',
-        'Transferencias monetarias GLOBAL',
-        'Transferencias monetarias CASH',
-        'Valor total transferencias USD'
-    ],
-    'unidad': ['Kits', 'Personas', 'Niños', 'Personas', 'Personas', 'Personas', 'Personas', 'USD'],
-    'meta': [3600, 18000, 180, 3000, 100, 10000, 10000, 900000],
-    'logro': [2800, 14500, 135, 2400, 78, 8200, 7800, 680000],
-    'peso': [29, 29, 10, 10, 3, 58, 58, 58]
-}
-
-# ES - El Salvador
-data_es = {
-    'categoria': [
-        'WASH', 'WASH', 'WASH', 'WASH',
-        'Protección', 'Protección', 'Protección',
-        'VBG',
-        'Protección Niñez', 'Protección Niñez', 'Protección Niñez', 'Protección Niñez',
-        'Seguridad Alimentaria', 'Seguridad Alimentaria', 'Seguridad Alimentaria', 
-        'Seguridad Alimentaria', 'Seguridad Alimentaria', 'Seguridad Alimentaria'
-    ],
-    'indicador': [
-        'Hogares con kits de higiene',
-        'Personas con mensajes WASH',
-        'Personas con agua segura',
-        '% mecanismo de quejas',
-        'Asistencia legal/asesoría',
-        'Apoyo psicosocial por violencia',
-        '% mecanismo de quejas',
-        'Prevención/mitigación de violencia',
-        'Niños/as apoyo protección',
-        'Personas en espacios amigables',
-        'Transferencias efectivo niñez',
-        'Valor transferencias niñez USD',
-        'Transferencia multipropósito',
-        'Valor cash multipropósito USD',
-        'Transferencias recurrentes',
-        '% consultados respuesta',
-        'Insumos agrícolas',
-        'Kits de pesca'
-    ],
-    'unidad': ['Hogares', 'Personas', 'Personas', '%', 'Personas', 'Personas', '%', 'Personas', 
-               'Niños', 'Personas', 'Personas', 'USD', 'Personas', 'USD', 'Personas', '%', 'Personas', 'Personas'],
-    'meta': [11892, 25625, 12800, 55, 331, 991, 55, 3499, 418, 1930, 251, 37650, 14677, 1682640, 14677, 55, 3929, 613],
-    'logro': [8500, 18500, 9200, 42, 230, 720, 42, 2600, 310, 1450, 185, 27500, 10500, 1200000, 10500, 42, 2800, 440],
-    'peso': [25, 25, 25, 25, 4, 4, 4, 4, 11, 11, 11, 11, 56, 56, 56, 56, 56, 56]
-}
-
-# ============ HN - HONDURAS (ACNUR + PMA) ============
-
-# ACNUR - Datos existentes
-data_hn_acnur = {
-    'categoria': [
-        'Gestión de Casos', 'Gestión de Casos',
-        'SMAPS',
-        'Entrega de Kits',
-        'Fortalecimiento Liderazgo'
-    ],
-    'indicador': [
-        'Niños/as gestión de casos',
-        'Familiares gestión de casos',
-        'Personas SMAPS',
-        'Kits higiene/dignidad',
-        'Líderes comunitarios fortalecidos'
-    ],
-    'unidad': ['Niños', 'Personas', 'Personas', 'Personas', 'Personas'],
-    'meta': [180, 360, 6033, 3010, 131],
-    'logro': [145, 295, 5100, 2550, 108],
-    'programa': ['ACNUR'] * 5,
-    'peso': [0, 0, 0, 0, 0]
-}
-
-# PMA - Nuevos datos
-data_hn_pma = {
-    'categoria': [
-        'Objetivo 1', 'Objetivo 1', 'Objetivo 1',
-        'Objetivo 2', 'Objetivo 2', 'Objetivo 2',
-        'Objetivo 3'
-    ],
-    'indicador': [
-        'Sensibilización - Total',
-        'Sensibilización - Ocotepeque',
-        'Sensibilización - Santa Bárbara',
-        'Acompañamiento - Total',
-        'Acompañamiento - Ocotepeque',
-        'Acompañamiento - Santa Bárbara',
-        'Monitoreo y sistematización'
-    ],
-    'unidad': ['Hogares', 'Hogares', 'Hogares', 'Hogares', 'Hogares', 'Hogares', 'Informe'],
-    'meta': [3665, 1500, 2165, 3665, 1500, 2165, 1],
-    'logro': [2850, 1200, 1650, 2750, 1150, 1600, 0.5],
-    'programa': ['PMA'] * 7,
-    'peso': [0, 0, 0, 0, 0, 0, 0]
-}
-
-# Combinar HN
-data_hn_combinado = {
-    'categoria': data_hn_acnur['categoria'] + data_hn_pma['categoria'],
-    'indicador': data_hn_acnur['indicador'] + data_hn_pma['indicador'],
-    'unidad': data_hn_acnur['unidad'] + data_hn_pma['unidad'],
-    'meta': data_hn_acnur['meta'] + data_hn_pma['meta'],
-    'logro': data_hn_acnur['logro'] + data_hn_pma['logro'],
-    'programa': data_hn_acnur['programa'] + data_hn_pma['programa'],
-    'peso': data_hn_acnur['peso'] + data_hn_pma['peso']
-}
-
-data_hn = data_hn_combinado
-
-# ============ DATOS DE MUNICIPIOS ============
-
-municipios_data = [
-    # ===== GUATEMALA =====
-    {
-        'pais': 'Guatemala',
-        'departamento': 'Alta Verapaz',
-        'municipio': 'Santa Catalina La Tinta',
-        'lat': 15.5975,
-        'lon': -89.8857,
-        'cumplimiento': 82,
-        'estado': '🟢',
-        'categorias': {'WASH': 85, 'Protección Niñez': 68, 'VBG': 75, 'Seguridad Alimentaria': 90},
-        'programa': 'GT'
-    },
-    {
-        'pais': 'Guatemala',
-        'departamento': 'Alta Verapaz',
-        'municipio': 'Panzós (Telemán)',
-        'lat': 15.4000,
-        'lon': -89.6667,
-        'cumplimiento': 68,
-        'estado': '🟡',
-        'categorias': {'WASH': 65, 'Protección Niñez': 70, 'VBG': 72, 'Seguridad Alimentaria': 66},
-        'programa': 'GT'
-    },
-    {
-        'pais': 'Guatemala',
-        'departamento': 'Quiché',
-        'municipio': 'San Antonio Ilotenango',
-        'lat': 15.0497,
-        'lon': -91.2670,
-        'cumplimiento': 85,
-        'estado': '🟢',
-        'categorias': {'WASH': 88, 'Protección Niñez': 82, 'VBG': 80, 'Seguridad Alimentaria': 86},
-        'programa': 'GT'
-    },
-    {
-        'pais': 'Guatemala',
-        'departamento': 'Quiché',
-        'municipio': 'Joyabaj',
-        'lat': 14.9928,
-        'lon': -90.8000,
-        'cumplimiento': 72,
-        'estado': '🟡',
-        'categorias': {'WASH': 70, 'Protección Niñez': 68, 'VBG': 75, 'Seguridad Alimentaria': 74},
-        'programa': 'GT'
-    },
-    {
-        'pais': 'Guatemala',
-        'departamento': 'Quiché',
-        'municipio': 'Canillá',
-        'lat': 15.1467,
-        'lon': -91.3158,
-        'cumplimiento': 88,
-        'estado': '🟢',
-        'categorias': {'WASH': 90, 'Protección Niñez': 85, 'VBG': 82, 'Seguridad Alimentaria': 89},
-        'programa': 'GT'
-    },
+# ============================================
+# CARGA DE DATOS
+# ============================================
+@st.cache_data
+def load_data():
+    """Carga los datos desde el archivo CSV"""
+    df = pd.read_csv('proyectos_guatecompras.csv', encoding='utf-8')
     
-    # ===== EL SALVADOR =====
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Santa Ana',
-        'municipio': 'Santa Ana Este',
-        'lat': 14.0167,
-        'lon': -89.4333,
-        'cumplimiento': 75,
-        'estado': '🟡',
-        'categorias': {'WASH': 78, 'Protección Niñez': 72, 'VBG': 70, 'Seguridad Alimentaria': 76},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Santa Ana',
-        'municipio': 'Santa Ana Centro',
-        'lat': 14.0200,
-        'lon': -89.4400,
-        'cumplimiento': 78,
-        'estado': '🟡',
-        'categorias': {'WASH': 80, 'Protección Niñez': 75, 'VBG': 74, 'Seguridad Alimentaria': 79},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Ahuachapán',
-        'municipio': 'Ahuachapán Sur',
-        'lat': 13.9333,
-        'lon': -89.8500,
-        'cumplimiento': 70,
-        'estado': '🟡',
-        'categorias': {'WASH': 72, 'Protección Niñez': 68, 'VBG': 65, 'Seguridad Alimentaria': 71},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Chalatenango',
-        'municipio': 'Chalatenango Centro',
-        'lat': 14.0333,
-        'lon': -89.0500,
-        'cumplimiento': 68,
-        'estado': '🟡',
-        'categorias': {'WASH': 70, 'Protección Niñez': 65, 'VBG': 62, 'Seguridad Alimentaria': 69},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'La Unión',
-        'municipio': 'La Unión Norte',
-        'lat': 13.5000,
-        'lon': -87.8667,
-        'cumplimiento': 65,
-        'estado': '🟡',
-        'categorias': {'WASH': 68, 'Protección Niñez': 62, 'VBG': 60, 'Seguridad Alimentaria': 66},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'La Libertad',
-        'municipio': 'La Libertad Centro',
-        'lat': 13.6833,
-        'lon': -89.2833,
-        'cumplimiento': 74,
-        'estado': '🟡',
-        'categorias': {'WASH': 76, 'Protección Niñez': 72, 'VBG': 70, 'Seguridad Alimentaria': 75},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'La Libertad',
-        'municipio': 'La Libertad Costa',
-        'lat': 13.6900,
-        'lon': -89.2900,
-        'cumplimiento': 72,
-        'estado': '🟡',
-        'categorias': {'WASH': 74, 'Protección Niñez': 70, 'VBG': 68, 'Seguridad Alimentaria': 73},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'La Libertad',
-        'municipio': 'La Libertad Oeste',
-        'lat': 13.7000,
-        'lon': -89.3000,
-        'cumplimiento': 70,
-        'estado': '🟡',
-        'categorias': {'WASH': 72, 'Protección Niñez': 68, 'VBG': 66, 'Seguridad Alimentaria': 71},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Morazán',
-        'municipio': 'Morazán Sur',
-        'lat': 13.7667,
-        'lon': -88.1000,
-        'cumplimiento': 68,
-        'estado': '🟡',
-        'categorias': {'WASH': 70, 'Protección Niñez': 65, 'VBG': 63, 'Seguridad Alimentaria': 69},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'San Miguel',
-        'municipio': 'San Miguel Centro',
-        'lat': 13.4833,
-        'lon': -88.1833,
-        'cumplimiento': 76,
-        'estado': '🟡',
-        'categorias': {'WASH': 78, 'Protección Niñez': 74, 'VBG': 72, 'Seguridad Alimentaria': 77},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'San Salvador',
-        'municipio': 'San Salvador Este',
-        'lat': 13.7000,
-        'lon': -89.1900,
-        'cumplimiento': 80,
-        'estado': '🟢',
-        'categorias': {'WASH': 82, 'Protección Niñez': 78, 'VBG': 76, 'Seguridad Alimentaria': 81},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'San Salvador',
-        'municipio': 'San Salvador Oeste',
-        'lat': 13.7000,
-        'lon': -89.2100,
-        'cumplimiento': 78,
-        'estado': '🟡',
-        'categorias': {'WASH': 80, 'Protección Niñez': 76, 'VBG': 74, 'Seguridad Alimentaria': 79},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'San Salvador',
-        'municipio': 'San Salvador Sur',
-        'lat': 13.6900,
-        'lon': -89.2000,
-        'cumplimiento': 75,
-        'estado': '🟡',
-        'categorias': {'WASH': 77, 'Protección Niñez': 73, 'VBG': 71, 'Seguridad Alimentaria': 76},
-        'programa': 'ES'
-    },
-    {
-        'pais': 'El Salvador',
-        'departamento': 'Usulután',
-        'municipio': 'Usulután Este',
-        'lat': 13.4167,
-        'lon': -88.4667,
-        'cumplimiento': 69,
-        'estado': '🟡',
-        'categorias': {'WASH': 71, 'Protección Niñez': 67, 'VBG': 65, 'Seguridad Alimentaria': 70},
-        'programa': 'ES'
-    },
+    # Limpiar nombres de columnas
+    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
     
-    # ===== HONDURAS - ACNUR =====
-    {
-        'pais': 'Honduras',
-        'departamento': 'Santa Bárbara',
-        'municipio': 'Santa Bárbara',
-        'lat': 15.4667,
-        'lon': -88.3667,
-        'cumplimiento': 85,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 84, 'SMAPS': 86, 'Entrega de Kits': 83, 'Fortalecimiento Liderazgo': 85},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Santa Bárbara',
-        'municipio': 'Quimistán',
-        'lat': 15.3500,
-        'lon': -88.4000,
-        'cumplimiento': 82,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 80, 'SMAPS': 83, 'Entrega de Kits': 82, 'Fortalecimiento Liderazgo': 81},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Cortés',
-        'municipio': 'San Pedro Sula',
-        'lat': 15.5000,
-        'lon': -88.0333,
-        'cumplimiento': 88,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 87, 'SMAPS': 89, 'Entrega de Kits': 86, 'Fortalecimiento Liderazgo': 88},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Francisco Morazán',
-        'municipio': 'Villa Nueva',
-        'lat': 14.0333,
-        'lon': -87.0833,
-        'cumplimiento': 80,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 78, 'SMAPS': 81, 'Entrega de Kits': 79, 'Fortalecimiento Liderazgo': 80},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Francisco Morazán',
-        'municipio': 'Tegucigalpa',
-        'lat': 14.0833,
-        'lon': -87.2167,
-        'cumplimiento': 86,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 85, 'SMAPS': 87, 'Entrega de Kits': 84, 'Fortalecimiento Liderazgo': 86},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Ocotepeque',
-        'municipio': 'Ocotepeque',
-        'lat': 14.4333,
-        'lon': -89.2000,
-        'cumplimiento': 78,
-        'estado': '🟡',
-        'categorias': {'Gestión de Casos': 76, 'SMAPS': 79, 'Entrega de Kits': 77, 'Fortalecimiento Liderazgo': 78},
-        'programa': 'ACNUR'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Comayagua',
-        'municipio': 'Comayagua',
-        'lat': 14.4500,
-        'lon': -87.6333,
-        'cumplimiento': 84,
-        'estado': '🟢',
-        'categorias': {'Gestión de Casos': 83, 'SMAPS': 85, 'Entrega de Kits': 82, 'Fortalecimiento Liderazgo': 84},
-        'programa': 'ACNUR'
-    },
+    # Convertir columnas numéricas
+    columnas_numericas = ['monto_adjudicado', 'fianza_sostenimiento', 'fianza_cumplimiento', 'numero_ofertas']
+    for col in columnas_numericas:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # ===== HONDURAS - PMA (municipios adicionales) =====
-    {
-        'pais': 'Honduras',
-        'departamento': 'Santa Bárbara',
-        'municipio': 'Santa Bárbara (PMA)',
-        'lat': 15.4750,
-        'lon': -88.3750,
-        'cumplimiento': 76,
-        'estado': '🟡',
-        'categorias': {'Objetivo 1': 76, 'Objetivo 2': 74, 'Objetivo 3': 50},
-        'programa': 'PMA'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Santa Bárbara',
-        'municipio': 'Quimistán (PMA)',
-        'lat': 15.3580,
-        'lon': -88.4080,
-        'cumplimiento': 76,
-        'estado': '🟡',
-        'categorias': {'Objetivo 1': 76, 'Objetivo 2': 74, 'Objetivo 3': 50},
-        'programa': 'PMA'
-    },
-    {
-        'pais': 'Honduras',
-        'departamento': 'Ocotepeque',
-        'municipio': 'Ocotepeque (PMA)',
-        'lat': 14.4400,
-        'lon': -89.2100,
-        'cumplimiento': 79,
-        'estado': '🟡',
-        'categorias': {'Objetivo 1': 80, 'Objetivo 2': 77, 'Objetivo 3': 50},
-        'programa': 'PMA'
-    }
-]
-
-# ============ FUNCIONES DE PROCESAMIENTO ============
-
-def get_estado(pct):
-    if pct >= 85:
-        return '🟢'
-    elif pct >= 60:
-        return '🟡'
-    else:
-        return '🔴'
-
-def get_color(pct):
-    if pct >= 85:
-        return '#2ecc71'
-    elif pct >= 60:
-        return '#f1c40f'
-    else:
-        return '#e74c3c'
-
-def get_programa_color(programa):
-    colores = {
-        'GT': '#1a5276',
-        'ES': '#2e86c1',
-        'ACNUR': '#1a5276',
-        'PMA': '#27ae60'
-    }
-    return colores.get(programa, '#gray')
-
-def procesar_data(data, proyecto):
-    df = pd.DataFrame(data)
-    df['% Cumplimiento'] = (df['logro'] / df['meta'] * 100).round(1)
-    df['Estado'] = df['% Cumplimiento'].apply(get_estado)
-    df['Proyecto'] = proyecto
+    # Convertir fechas
+    columnas_fechas = ['fecha_publicacion', 'fecha_presentacion', 'fecha_cierre', 'fecha_adjudicacion']
+    for col in columnas_fechas:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    
+    # Extraer año de adjudicación
+    if 'fecha_adjudicacion' in df.columns:
+        df['año_adjudicacion'] = df['fecha_adjudicacion'].dt.year
+    
     return df
 
-# Procesar datos de proyectos
-df_gt = procesar_data(data_gt, 'Guatemala')
-df_es = procesar_data(data_es, 'El Salvador')
-df_hn = procesar_data(data_hn, 'Honduras')
+# Cargar datos
+try:
+    df = load_data()
+    if df is not None and not df.empty:
+        st.success(f"✅ Datos cargados correctamente: {len(df)} licitaciones")
+    else:
+        st.error("❌ No se encontraron datos en el archivo")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ Error al cargar datos: {e}")
+    st.info("📝 Asegúrate de que el archivo 'licitaciones.csv' existe en el mismo directorio")
+    st.stop()
 
-# DataFrame de municipios
-df_municipios = pd.DataFrame(municipios_data)
+# ============================================
+# FILTROS
+# ============================================
+st.sidebar.header("🔍 Filtros")
 
-# ============ FUNCIONES DE VISUALIZACIÓN ============
+# FILTRO 1: Año
+st.sidebar.subheader("📅 1. Año de Adjudicación")
+años_disponibles = sorted(df['año_adjudicacion'].dropna().unique().astype(int))
+años_seleccionados = st.sidebar.multiselect(
+    "Año",
+    options=años_disponibles,
+    default=años_disponibles
+)
 
-def crear_mapa(pais_filtro='Todos', programa_filtro='Todos'):
-    """Crea un mapa de Folium con todos los municipios"""
-    
-    # Coordenadas centro de Centroamérica
-    mapa = folium.Map(
-        location=[14.5, -89.0],
-        zoom_start=6,
-        tiles='OpenStreetMap'
+df_filtrado = df[df['año_adjudicacion'].isin(años_seleccionados)]
+
+if df_filtrado.empty:
+    st.warning("⚠️ No hay licitaciones en los años seleccionados.")
+    st.stop()
+
+# FILTRO 2: Región
+st.sidebar.subheader("🗺️ 2. Región")
+regiones_disponibles = sorted(df_filtrado['region'].dropna().unique())
+regiones_seleccionadas = st.sidebar.multiselect(
+    "Región",
+    options=regiones_disponibles,
+    default=regiones_disponibles
+)
+
+df_filtrado = df_filtrado[df_filtrado['region'].isin(regiones_seleccionadas)]
+
+# FILTRO 3: Departamento
+st.sidebar.subheader("📍 3. Departamento")
+deptos_disponibles = sorted(df_filtrado['departamento'].dropna().unique())
+deptos_seleccionados = st.sidebar.multiselect(
+    "Departamento",
+    options=deptos_disponibles,
+    default=deptos_disponibles
+)
+
+df_filtrado = df_filtrado[df_filtrado['departamento'].isin(deptos_seleccionados)]
+
+# FILTRO 4: Tipo de Proyecto
+st.sidebar.subheader("🏗️ 4. Tipo de Proyecto")
+tipos_disponibles = sorted(df_filtrado['tipo_proyecto'].dropna().unique())
+tipos_seleccionados = st.sidebar.multiselect(
+    "Tipo de Proyecto",
+    options=tipos_disponibles,
+    default=tipos_disponibles
+)
+
+df_filtrado = df_filtrado[df_filtrado['tipo_proyecto'].isin(tipos_seleccionados)]
+
+# FILTRO 5: Estatus
+st.sidebar.subheader("📌 5. Estatus")
+estatus_disponibles = sorted(df_filtrado['estatus'].dropna().unique())
+estatus_seleccionados = st.sidebar.multiselect(
+    "Estatus",
+    options=estatus_disponibles,
+    default=estatus_disponibles
+)
+
+df_filtrado = df_filtrado[df_filtrado['estatus'].isin(estatus_seleccionados)]
+
+# FILTRO 6: Rango de Monto
+st.sidebar.subheader("💰 6. Rango de Monto")
+monto_min = float(df_filtrado['monto_adjudicado'].min() if not df_filtrado['monto_adjudicado'].isna().all() else 0)
+monto_max = float(df_filtrado['monto_adjudicado'].max() if not df_filtrado['monto_adjudicado'].isna().all() else 10000000)
+
+rango_monto = st.sidebar.slider(
+    "Monto Adjudicado (Q)",
+    min_value=monto_min,
+    max_value=monto_max,
+    value=(monto_min, monto_max),
+    format="Q%.2f"
+)
+
+df_filtrado = df_filtrado[
+    df_filtrado['monto_adjudicado'].between(rango_monto[0], rango_monto[1])
+]
+
+# Resumen de filtros
+st.sidebar.markdown("---")
+st.sidebar.subheader("📊 Resumen")
+st.sidebar.info(f"""
+**Años:** {len(años_seleccionados)}  
+**Regiones:** {len(regiones_seleccionadas)}  
+**Departamentos:** {len(deptos_seleccionados)}  
+**Tipos:** {len(tipos_seleccionados)}  
+**Estatus:** {len(estatus_seleccionados)}  
+**Licitaciones:** {len(df_filtrado)}
+""")
+
+# ============================================
+# MÉTRICAS PRINCIPALES
+# ============================================
+st.header("📈 Indicadores Clave")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric("Total Licitaciones", len(df_filtrado))
+
+with col2:
+    monto_total = df_filtrado['monto_adjudicado'].sum()
+    st.metric("Monto Total Adjudicado", f"Q{monto_total:,.2f}")
+
+with col3:
+    monto_promedio = df_filtrado['monto_adjudicado'].mean()
+    st.metric("Monto Promedio", f"Q{monto_promedio:,.2f}")
+
+with col4:
+    proveedores = df_filtrado['proveedor_ganador'].nunique()
+    st.metric("Proveedores Distintos", proveedores)
+
+st.markdown("---")
+
+# ============================================
+# GRÁFICOS PRINCIPALES
+# ============================================
+
+# Gráfico 1: Evolución por año
+st.subheader("📅 Evolución de Licitaciones por Año")
+licitaciones_por_año = df_filtrado.groupby('año_adjudicacion').size().reset_index(name='Cantidad')
+fig_temporal = px.line(
+    licitaciones_por_año,
+    x='año_adjudicacion',
+    y='Cantidad',
+    markers=True,
+    line_shape='linear'
+)
+fig_temporal.update_traces(line=dict(width=3), marker=dict(size=10))
+st.plotly_chart(fig_temporal, use_container_width=True)
+
+# Gráficos en dos columnas
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📊 Licitaciones por Tipo de Proyecto")
+    licitaciones_por_tipo = df_filtrado.groupby('tipo_proyecto').size().reset_index(name='Cantidad')
+    licitaciones_por_tipo = licitaciones_por_tipo.sort_values('Cantidad', ascending=False).head(10)
+    fig_tipo = px.bar(
+        licitaciones_por_tipo,
+        x='tipo_proyecto',
+        y='Cantidad',
+        title="Top 10 Tipos de Proyecto",
+        color='Cantidad',
+        color_continuous_scale='Viridis'
     )
+    st.plotly_chart(fig_tipo, use_container_width=True)
+
+with col2:
+    st.subheader("💰 Monto por Región")
+    monto_por_region = df_filtrado.groupby('region')['monto_adjudicado'].sum().reset_index()
+    monto_por_region = monto_por_region.sort_values('monto_adjudicado', ascending=True)
+    fig_region = px.bar(
+        monto_por_region,
+        x='monto_adjudicado',
+        y='region',
+        orientation='h',
+        title="Monto Total por Región",
+        labels={'monto_adjudicado': 'Monto (Q)', 'region': 'Región'},
+        color='monto_adjudicado',
+        color_continuous_scale='Blues'
+    )
+    st.plotly_chart(fig_region, use_container_width=True)
+
+# Gráfico 3: Top Proveedores
+st.subheader("🏢 Top 10 Proveedores por Monto Adjudicado")
+top_proveedores = df_filtrado.groupby('proveedor_ganador')['monto_adjudicado'].sum().reset_index()
+top_proveedores = top_proveedores.sort_values('monto_adjudicado', ascending=False).head(10)
+fig_proveedores = px.bar(
+    top_proveedores,
+    x='monto_adjudicado',
+    y='proveedor_ganador',
+    orientation='h',
+    title="Top 10 Proveedores",
+    labels={'monto_adjudicado': 'Monto (Q)', 'proveedor_ganador': 'Proveedor'},
+    color='monto_adjudicado',
+    color_continuous_scale='Greens'
+)
+st.plotly_chart(fig_proveedores, use_container_width=True)
+
+# Gráfico 4: Estatus
+st.subheader("📌 Distribución por Estatus")
+estatus_count = df_filtrado['estatus'].value_counts().reset_index()
+estatus_count.columns = ['Estatus', 'Cantidad']
+fig_estatus = px.pie(
+    estatus_count,
+    values='Cantidad',
+    names='Estatus',
+    title="Proporción de Licitaciones por Estatus",
+    hole=0.3
+)
+st.plotly_chart(fig_estatus, use_container_width=True)
+
+# Gráfico 5: Número de Ofertas vs Monto
+st.subheader("📊 Relación: Número de Ofertas vs Monto Adjudicado")
+df_ofertas = df_filtrado.dropna(subset=['numero_ofertas', 'monto_adjudicado'])
+if not df_ofertas.empty:
+    fig_ofertas = px.scatter(
+        df_ofertas,
+        x='numero_ofertas',
+        y='monto_adjudicado',
+        color='tipo_proyecto',
+        size='monto_adjudicado',
+        hover_data=['proveedor_ganador', 'departamento', 'descripcion'],
+        title="Número de Ofertas vs Monto Adjudicado",
+        labels={'numero_ofertas': 'Número de Ofertas', 'monto_adjudicado': 'Monto (Q)'}
+    )
+    st.plotly_chart(fig_ofertas, use_container_width=True)
+
+
+# ============================================
+# MAPAS
+# ============================================
+st.header("🗺️ Visualización Geográfica de Licitaciones")
+
+try:
+    import folium
+    from streamlit_folium import folium_static
+    from folium.plugins import MarkerCluster, HeatMap
     
-    # Filtrar datos
-    df_filtrado = df_municipios.copy()
-    if pais_filtro != 'Todos':
-        df_filtrado = df_filtrado[df_filtrado['pais'] == pais_filtro]
-    if programa_filtro != 'Todos':
-        if programa_filtro == 'ACNUR':
-            df_filtrado = df_filtrado[df_filtrado['programa'].isin(['ACNUR', 'GT', 'ES'])]
-        elif programa_filtro == 'PMA':
-            df_filtrado = df_filtrado[df_filtrado['programa'] == 'PMA']
-        elif programa_filtro == 'GT':
-            df_filtrado = df_filtrado[df_filtrado['programa'] == 'GT']
-        elif programa_filtro == 'ES':
-            df_filtrado = df_filtrado[df_filtrado['programa'] == 'ES']
+    # NOTA: Tus datos de licitaciones NO tienen coordenadas (LATITUD/LONGITUD)
+    # Por lo tanto, usamos centroides por departamento para ubicar las licitaciones
     
-    # Crear capa de calor
-    heat_data = []
+    # Cargar coordenadas de departamentos (puedes crear un archivo con las coordenadas de cada departamento)
+    # Si no tienes coordenadas, usamos centroides aproximados
+    coordenadas_departamentos = {
+        'Guatemala': [14.6349, -90.5069],
+        'Sacatepéquez': [14.5547, -90.7333],
+        'Chimaltenango': [14.6604, -90.8215],
+        'Escuintla': [14.3012, -90.7852],
+        'Santa Rosa': [14.1646, -90.2852],
+        'Sololá': [14.7483, -91.1858],
+        'Totonicapán': [14.9124, -91.3611],
+        'Quetzaltenango': [14.8348, -91.5184],
+        'Suchitepéquez': [14.5358, -91.4839],
+        'Retalhuleu': [14.5341, -91.6787],
+        'San Marcos': [14.9657, -91.7951],
+        'Huehuetenango': [15.3192, -91.4724],
+        'Quiché': [15.0304, -91.1484],
+        'Baja Verapaz': [15.1322, -90.3761],
+        'Alta Verapaz': [15.4865, -90.3273],
+        'Petén': [16.9064, -89.9315],
+        'Izabal': [15.6868, -88.8704],
+        'Zacapa': [14.9781, -89.5283],
+        'Chiquimula': [14.8003, -89.5442],
+        'Jalapa': [14.6347, -89.9867],
+        'Jutiapa': [14.2905, -89.8919],
+        'El Progreso': [14.8571, -90.0795]
+    }
     
-    # Agregar marcadores
-    for _, row in df_filtrado.iterrows():
-        # Calcular tamaño del círculo según cumplimiento
-        radius = 8 + (row['cumplimiento'] / 100) * 12
-        
-        # Color según estado
-        color = get_color(row['cumplimiento'])
-        
-        # Color del borde según programa
-        borde_color = get_programa_color(row['programa'])
-        
-        # Determinar si es municipio de HN con PMA
-        es_pma = row['programa'] == 'PMA'
-        es_acnur = row['programa'] == 'ACNUR'
-        
-        # Crear popup con información detallada
-        popup_text = f"""
-        <div style="font-family: Arial, sans-serif; min-width: 280px; max-width: 350px;">
-            <h4 style="margin: 0 0 8px 0; color: #2c3e50;">📍 {row['municipio']}</h4>
-            <p style="margin: 0 0 4px 0; color: #34495e;">
-                <b>🏛️ {row['departamento']}</b><br>
-                <b>🌍 {row['pais']}</b>
-            </p>
-            <hr style="margin: 8px 0;">
-            <p style="font-size: 18px; margin: 0 0 8px 0;">
-                <b>📊 Cumplimiento:</b> {row['cumplimiento']}% {row['estado']}
-            </p>
-        """
-        
-        # Mostrar categorías según el programa
-        if es_pma:
-            popup_text += f"""
-            <hr style="margin: 8px 0;">
-            <p style="margin: 4px 0; font-size: 14px; color: #27ae60;">
-                <b>🟢 PMA</b><br>
-                📌 Objetivo 1: {row['categorias'].get('Objetivo 1', 0)}%<br>
-                📌 Objetivo 2: {row['categorias'].get('Objetivo 2', 0)}%<br>
-                📌 Objetivo 3: {row['categorias'].get('Objetivo 3', 0)}%
-            </p>
-            """
-        elif es_acnur:
-            popup_text += f"""
-            <hr style="margin: 8px 0;">
-            <p style="margin: 4px 0; font-size: 14px; color: #1a5276;">
-                <b>🔵 ACNUR</b><br>
-                📌 Gestión de Casos: {row['categorias'].get('Gestión de Casos', 0)}%<br>
-                📌 SMAPS: {row['categorias'].get('SMAPS', 0)}%<br>
-                📌 Entrega de Kits: {row['categorias'].get('Entrega de Kits', 0)}%<br>
-                📌 Liderazgo: {row['categorias'].get('Fortalecimiento Liderazgo', 0)}%
-            </p>
-            """
+    # Crear coordenadas para las licitaciones basadas en su departamento
+    licitaciones_con_coords = df_filtrado.copy()
+    
+    # Agregar coordenadas según departamento
+    def get_coords(departamento):
+        if departamento in coordenadas_departamentos:
+            return coordenadas_departamentos[departamento]
         else:
-            # GT o ES
-            popup_text += f"""
-            <hr style="margin: 8px 0;">
-            <p style="margin: 4px 0; font-size: 14px;">
-                <b>📋 Indicadores:</b><br>
-                💧 WASH: {row['categorias'].get('WASH', 0)}%<br>
-                👦 Niñez: {row['categorias'].get('Protección Niñez', 0)}%<br>
-                👩 VBG: {row['categorias'].get('VBG', 0)}%<br>
-                🌾 Seg. Alimentaria: {row['categorias'].get('Seguridad Alimentaria', 0)}%
-            </p>
-            """
-        
-        popup_text += """
-            <hr style="margin: 8px 0;">
-            <p style="font-size: 12px; color: #7f8c8d; margin: 0;">
-                👆 Click para ver detalles en el panel
-            </p>
-        </div>
-        """
-        
-        # Crear popup con HTML
-        popup = folium.Popup(popup_text, max_width=350)
-        
-        # Agregar marcador circular
-        folium.CircleMarker(
-            location=[row['lat'], row['lon']],
-            radius=radius,
-            popup=popup,
-            color=borde_color,
-            weight=3,
-            fill=True,
-            fill_color=color,
-            fill_opacity=0.7,
-            tooltip=f"{row['municipio']}: {row['cumplimiento']}%"
-        ).add_to(mapa)
-        
-        # Agregar datos para heatmap
-        heat_data.append([row['lat'], row['lon'], row['cumplimiento'] / 100])
+            return [15.5, -90.25]  # Centro aproximado de Guatemala
     
-    # Agregar leyenda
-    legend_html = '''
-    <div style="position: fixed; bottom: 50px; left: 50px; z-index: 9999; 
-                background-color: white; padding: 15px; border-radius: 10px; 
-                box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-family: Arial, sans-serif;
-                min-width: 200px;">
-        <div style="font-weight: bold; margin-bottom: 8px; color: #2c3e50;">
-            🎯 Leyenda
-        </div>
-        <div style="display: flex; align-items: center; margin: 4px 0;">
-            <div style="width: 14px; height: 14px; border-radius: 50%; 
-                        background: #2ecc71; margin-right: 10px;"></div>
-            <span>≥ 85% (Verde)</span>
-        </div>
-        <div style="display: flex; align-items: center; margin: 4px 0;">
-            <div style="width: 14px; height: 14px; border-radius: 50%; 
-                        background: #f1c40f; margin-right: 10px;"></div>
-            <span>60-84% (Amarillo)</span>
-        </div>
-        <div style="display: flex; align-items: center; margin: 4px 0;">
-            <div style="width: 14px; height: 14px; border-radius: 50%; 
-                        background: #e74c3c; margin-right: 10px;"></div>
-            <span>&lt; 60% (Rojo)</span>
-        </div>
-        <hr style="margin: 8px 0;">
-        <div style="font-size: 12px; color: #7f8c8d;">
-            🔵 Borde Azul: GT / ACNUR<br>
-            🟢 Borde Verde: PMA<br>
-            🔵 Borde Azul Claro: ES
-        </div>
-    </div>
-    '''
-    
-    mapa.get_root().html.add_child(folium.Element(legend_html))
-    
-    # Agregar HeatMap si hay datos
-    if len(heat_data) > 5:
-        HeatMap(heat_data, min_opacity=0.2, max_zoom=13, radius=25).add_to(mapa)
-    
-    return mapa
-
-def mostrar_tabla_indicadores(df, proyecto, programa_filtro=None):
-    """Muestra la tabla de indicadores"""
-    df_display = df.copy()
-    
-    # Si hay filtro de programa y existe la columna 'programa'
-    if programa_filtro and 'programa' in df_display.columns:
-        if programa_filtro != 'Todos':
-            df_display = df_display[df_display['programa'] == programa_filtro]
-    
-    # Seleccionar columnas a mostrar
-    columnas = ['categoria', 'indicador', 'unidad', 'meta', 'logro', '% Cumplimiento', 'Estado']
-    if 'programa' in df_display.columns:
-        columnas.insert(1, 'programa')
-    
-    st.dataframe(
-        df_display[columnas],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            'categoria': 'Categoría',
-            'programa': 'Programa',
-            'indicador': 'Indicador',
-            'unidad': 'Unidad',
-            'meta': st.column_config.NumberColumn('Meta', format="%d"),
-            'logro': st.column_config.NumberColumn('Logro', format="%d"),
-            '% Cumplimiento': st.column_config.NumberColumn('%', format="%.1f"),
-            'Estado': 'Estado'
-        }
+    licitaciones_con_coords['LATITUD'] = licitaciones_con_coords['departamento'].apply(
+        lambda x: get_coords(x)[0] if pd.notna(x) else None
     )
-
-def mostrar_alertas(df, programa_filtro=None):
-    """Muestra alertas activas"""
-    df_alerts = df.copy()
-    if programa_filtro and 'programa' in df_alerts.columns and programa_filtro != 'Todos':
-        df_alerts = df_alerts[df_alerts['programa'] == programa_filtro]
+    licitaciones_con_coords['LONGITUD'] = licitaciones_con_coords['departamento'].apply(
+        lambda x: get_coords(x)[1] if pd.notna(x) else None
+    )
     
-    alertas = df_alerts[df_alerts['Estado'] != '🟢']
-    if len(alertas) > 0:
-        for _, row in alertas.iterrows():
-            if row['Estado'] == '🔴':
-                st.error(
-                    f"🔴 **CRÍTICO**: {row['indicador']} - "
-                    f"{row['% Cumplimiento']}% ({row['logro']:.1f}/{row['meta']:.0f} {row['unidad']})"
-                )
-            else:
-                st.warning(
-                    f"🟡 **ATENCIÓN**: {row['indicador']} - "
-                    f"{row['% Cumplimiento']}% ({row['logro']:.1f}/{row['meta']:.0f} {row['unidad']})"
-                )
+    # Eliminar filas sin coordenadas
+    licitaciones_con_coords = licitaciones_con_coords.dropna(subset=['LATITUD', 'LONGITUD'])
+    
+    if len(licitaciones_con_coords) > 0:
+        center_lat = licitaciones_con_coords['LATITUD'].mean()
+        center_lon = licitaciones_con_coords['LONGITUD'].mean()
+        
+        tab1, tab2, tab3 = st.tabs(["📍 Mapa de Licitaciones", "🔥 Mapa de Calor", "💰 Mapa de Montos"])
+        
+        with tab1:
+            st.subheader("📍 Ubicación de Licitaciones por Departamento")
+            
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=8, control_scale=True)
+            marker_cluster = MarkerCluster().add_to(m)
+            
+            # Definir colores según estatus
+            status_colors = {
+                'Adjudicado': 'green',
+                'Evaluacion': 'orange',
+                'En Proceso': 'blue',
+                'Finalizado': 'purple'
+            }
+            
+            for _, row in licitaciones_con_coords.iterrows():
+                color = status_colors.get(row['estatus'], 'gray')
+                
+                popup = f"""
+                <div style="font-family: monospace; min-width: 280px;">
+                    <b style="font-size: 14px;">NOG: {row['nog']}</b><br>
+                    <hr style="margin: 5px 0;">
+                    <b>Descripción:</b> {row['descripcion'][:100]}...<br>
+                    <b>Ubicación:</b> {row['municipio']}, {row['departamento']}<br>
+                    <b>Tipo:</b> {row['tipo_proyecto']}<br>
+                    <b>Monto:</b> Q{row['monto_adjudicado']:,.2f}<br>
+                    <b>Proveedor:</b> {row['proveedor_ganador']}<br>
+                    <b>Ofertas:</b> {row['numero_ofertas']}<br>
+                    <b>Estatus:</b> {row['estatus']}<br>
+                    <b>Adjudicación:</b> {row['fecha_adjudicacion'].strftime('%d/%m/%Y') if pd.notna(row['fecha_adjudicacion']) else 'N/A'}
+                </div>
+                """
+                
+                folium.Marker(
+                    location=[row['LATITUD'], row['LONGITUD']],
+                    popup=folium.Popup(popup, max_width=350),
+                    tooltip=f"NOG: {row['nog']} - {row['proveedor_ganador']}",
+                    icon=folium.Icon(color=color, icon='info-sign', prefix='glyphicon')
+                ).add_to(marker_cluster)
+            
+            folium_static(m, width=1200, height=600)
+            
+            # Estadísticas
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Licitaciones mapeadas", len(licitaciones_con_coords))
+            with col2:
+                st.metric("Total licitaciones", len(df_filtrado))
+        
+        with tab2:
+            st.subheader("🔥 Mapa de Calor - Densidad de Licitaciones por Departamento")
+            
+            # Preparar datos ponderados por monto para el mapa de calor
+            heat_data = []
+            for _, row in licitaciones_con_coords.iterrows():
+                # Repetir coordenadas según el monto (para dar peso)
+                peso = min(int(row['monto_adjudicado'] / 100000), 50)  # Máximo 50 repeticiones
+                for _ in range(max(1, peso)):
+                    heat_data.append([row['LATITUD'], row['LONGITUD']])
+            
+            heat_map = folium.Map(location=[center_lat, center_lon], zoom_start=8)
+            HeatMap(heat_data, radius=20, blur=15, min_opacity=0.3).add_to(heat_map)
+            folium_static(heat_map, width=1200, height=600)
+            
+            # Top departamentos por cantidad de licitaciones
+            st.subheader("🏙️ Top 10 Departamentos con más licitaciones")
+            top_deptos = licitaciones_con_coords['departamento'].value_counts().head(10).reset_index()
+            top_deptos.columns = ['Departamento', 'Cantidad']
+            fig_top = px.bar(
+                top_deptos,
+                x='Cantidad',
+                y='Departamento',
+                orientation='h',
+                title="Licitaciones por Departamento",
+                color='Cantidad',
+                color_continuous_scale='Viridis'
+            )
+            st.plotly_chart(fig_top, use_container_width=True)
+        
+        with tab3:
+            st.subheader("💰 Mapa de Montos por Departamento")
+            
+            # Crear mapa coroplético con montos por departamento
+            monto_por_dep = licitaciones_con_coords.groupby('departamento')['monto_adjudicado'].sum().reset_index()
+            monto_por_dep.columns = ['Departamento', 'Monto_Total']
+            
+            # Crear mapa de colores
+            m_choropleth = folium.Map(location=[center_lat, center_lon], zoom_start=7)
+            
+            # Crear un GeoJSON simple para los departamentos (usando coordenadas de los centroides)
+            # Nota: Para un mapa coroplético más preciso, necesitarías un archivo GeoJSON de departamentos
+            # Por ahora, usamos marcadores con tamaño según monto
+            
+            for _, row in monto_por_dep.iterrows():
+                if row['Departamento'] in coordenadas_departamentos:
+                    coords = coordenadas_departamentos[row['Departamento']]
+                    monto = row['Monto_Total']
+                    
+                    # Tamaño del círculo según el monto
+                    radius = max(5, min(int(monto / 50000), 40))
+                    
+                    folium.CircleMarker(
+                        location=coords,
+                        radius=radius,
+                        popup=f"<b>{row['Departamento']}</b><br>Monto: Q{monto:,.2f}",
+                        tooltip=f"{row['Departamento']}: Q{monto:,.2f}",
+                        color='blue',
+                        fill=True,
+                        fillColor='blue',
+                        fillOpacity=0.5
+                    ).add_to(m_choropleth)
+            
+            folium_static(m_choropleth, width=1200, height=600)
+            
+            # Tabla de montos por departamento
+            st.subheader("📊 Resumen de Montos por Departamento")
+            monto_por_dep_sorted = monto_por_dep.sort_values('Monto_Total', ascending=False)
+            st.dataframe(
+                monto_por_dep_sorted.style.format({
+                    'Monto_Total': 'Q{:,.2f}'
+                }),
+                use_container_width=True
+            )
+    
     else:
-        st.success("✅ ¡Todos los indicadores están en verde! Excelente trabajo.")
-
-def mostrar_detalle_municipio(municipio_seleccionado):
-    """Muestra el detalle de un municipio seleccionado"""
-    if municipio_seleccionado is None:
-        st.info("👆 Haz clic en un municipio del mapa para ver sus detalles aquí")
-        return
-    
-    # Buscar el municipio en los datos
-    municipio = df_municipios[df_municipios['municipio'] == municipio_seleccionado]
-    if len(municipio) == 0:
-        st.warning("Municipio no encontrado")
-        return
-    
-    row = municipio.iloc[0]
-    
-    st.subheader(f"📍 {row['municipio']}")
-    st.caption(f"🏛️ {row['departamento']} · 🌍 {row['pais']}")
-    
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        st.metric("Cumplimiento Global", f"{row['cumplimiento']}%", delta=row['estado'])
-    with col2:
-        programa_label = "Programa"
-        if row['programa'] == 'GT':
-            programa_label = "🇬🇹 Guatemala"
-        elif row['programa'] == 'ES':
-            programa_label = "🇸🇻 El Salvador"
-        elif row['programa'] == 'ACNUR':
-            programa_label = "🔵 ACNUR"
-        elif row['programa'] == 'PMA':
-            programa_label = "🟢 PMA"
-        st.metric("Programa", programa_label)
-    with col3:
-        st.write("")  # Espacio
-    
-    # Mostrar categorías
-    st.markdown("**📋 Indicadores por categoría:**")
-    
-    if row['programa'] == 'PMA':
-        cols = st.columns(3)
-        objetivos = ['Objetivo 1', 'Objetivo 2', 'Objetivo 3']
-        for col, obj in zip(cols, objetivos):
-            with col:
-                if obj in row['categorias']:
-                    pct = row['categorias'][obj]
-                    estado = get_estado(pct)
-                    st.metric(
-                        label=f"{estado} {obj}",
-                        value=f"{pct}%"
-                    )
-    elif row['programa'] == 'ACNUR':
-        cols = st.columns(4)
-        categorias_hn = ['Gestión de Casos', 'SMAPS', 'Entrega de Kits', 'Fortalecimiento Liderazgo']
-        for col, cat in zip(cols, categorias_hn):
-            with col:
-                if cat in row['categorias']:
-                    pct = row['categorias'][cat]
-                    estado = get_estado(pct)
-                    st.metric(
-                        label=f"{estado} {cat}",
-                        value=f"{pct}%"
-                    )
-    else:
-        # GT o ES
-        cols = st.columns(4)
-        categorias_std = ['WASH', 'Protección Niñez', 'VBG', 'Seguridad Alimentaria']
-        for col, cat in zip(cols, categorias_std):
-            with col:
-                if cat in row['categorias']:
-                    pct = row['categorias'][cat]
-                    estado = get_estado(pct)
-                    st.metric(
-                        label=f"{estado} {cat}",
-                        value=f"{pct}%"
-                    )
-
-def mostrar_graficos_proyecto(df, proyecto, programa_filtro=None):
-    """Muestra gráficos del proyecto"""
-    df_display = df.copy()
-    if programa_filtro and 'programa' in df_display.columns and programa_filtro != 'Todos':
-        df_display = df_display[df_display['programa'] == programa_filtro]
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Gráfico de barras
-        fig = px.bar(
-            df_display,
-            x='indicador',
-            y='% Cumplimiento',
-            color='Estado',
-            title=f"Cumplimiento por Indicador - {proyecto}",
-            labels={'% Cumplimiento': 'Cumplimiento (%)', 'indicador': ''},
-            height=350,
-            color_discrete_map={'🟢': '#2ecc71', '🟡': '#f1c40f', '🔴': '#e74c3c'}
-        )
-        fig.update_layout(
-            xaxis_tickangle=-45,
-            showlegend=False,
-            yaxis_range=[0, 100]
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Gráfico de radar por categoría
-        categorias = df_display['categoria'].unique()
-        valores = []
-        for cat in categorias:
-            mask = df_display['categoria'] == cat
-            pct_prom = df_display[mask]['% Cumplimiento'].mean()
-            valores.append(pct_prom)
+        st.info("ℹ️ No hay licitaciones con departamento asignado para mostrar en el mapa")
         
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=valores + [valores[0]],
-            theta=list(categorias) + [categorias[0]],
-            fill='toself',
-            name=proyecto,
-            line_color='#1a5276',
-            fillcolor='rgba(26, 82, 118, 0.3)'
-        ))
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 100]
-                )
-            ),
-            showlegend=True,
-            height=350,
-            title=f"Perfil de cumplimiento - {proyecto}"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+except ImportError as e:
+    st.warning(f"⚠️ Librerías de mapas no instaladas: {e}")
+    st.info("📌 Para instalar: pip install folium streamlit-folium")
 
-# ============ INTERFAZ PRINCIPAL ============
 
-st.title("🌍 Monitoreo Humanitario - Centroamérica")
 
-# ============ SIDEBAR ============
-with st.sidebar:
-    st.header("🎯 Filtros")
-    
-    # Filtro por país
-    pais_filtro = st.selectbox(
-        "🌍 País",
-        options=['Todos', 'Guatemala', 'El Salvador', 'Honduras'],
-        index=0
+# ============================================
+# TABLA DE DATOS
+# ============================================
+st.subheader("📋 Detalle de Licitaciones")
+
+columnas_mostrar = [
+    'nog', 'descripcion', 'region', 'departamento', 'municipio',
+    'tipo_proyecto', 'estatus', 'monto_adjudicado', 'proveedor_ganador',
+    'numero_ofertas', 'fecha_adjudicacion'
+]
+
+columnas_existentes = [col for col in columnas_mostrar if col in df_filtrado.columns]
+
+busqueda = st.text_input("🔍 Buscar por descripción o NOG:", "")
+if busqueda:
+    df_filtrado = df_filtrado[
+        df_filtrado['descripcion'].str.contains(busqueda, case=False, na=False) |
+        df_filtrado['nog'].astype(str).str.contains(busqueda, case=False, na=False)
+    ]
+
+st.dataframe(
+    df_filtrado[columnas_existentes].style.format({
+        'monto_adjudicado': 'Q{:,.2f}',
+        'numero_ofertas': '{:.0f}'
+    }),
+    use_container_width=True,
+    height=400
+)
+
+# ============================================
+# ALERTAS
+# ============================================
+st.subheader("⚠️ Alertas")
+
+# Licitaciones con una sola oferta
+ofertas_unicas = df_filtrado[df_filtrado['numero_ofertas'] == 1]
+if len(ofertas_unicas) > 0:
+    st.warning(f"🚨 {len(ofertas_unicas)} licitaciones con solo una oferta")
+    with st.expander("Ver detalles"):
+        st.dataframe(ofertas_unicas[['nog', 'descripcion', 'monto_adjudicado', 'proveedor_ganador']])
+
+# Licitaciones con estatus "Evaluacion" o "En Proceso" antiguas
+fecha_limite = datetime.now() - pd.Timedelta(days=90)
+licitaciones_pendientes = df_filtrado[
+    (df_filtrado['estatus'].isin(['Evaluacion', 'En Proceso'])) &
+    (df_filtrado['fecha_adjudicacion'] < fecha_limite)
+]
+if len(licitaciones_pendientes) > 0:
+    st.info(f"📋 {len(licitaciones_pendientes)} licitaciones en proceso por más de 90 días")
+
+# ============================================
+# EXPORTAR
+# ============================================
+st.sidebar.markdown("---")
+st.sidebar.subheader("📥 Exportar")
+
+if st.sidebar.button("Exportar a CSV"):
+    csv = df_filtrado.to_csv(index=False)
+    st.sidebar.download_button(
+        label="Descargar",
+        data=csv,
+        file_name=f"licitaciones_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
     )
-    
-    # Filtro por programa (dinámico)
-    if pais_filtro == 'Honduras' or pais_filtro == 'Todos':
-        programa_options = ['Todos', 'ACNUR', 'PMA']
-    else:
-        programa_options = ['Todos']
-    
-    programa_filtro = st.selectbox(
-        "📂 Programa",
-        options=programa_options,
-        index=0
-    )
-    
-    st.markdown("---")
-    
-    # Mostrar resumen global
-    st.header("📊 Resumen Global")
-    
-    # Calcular cumplimiento por país
-    gt_global = (df_gt['logro'].sum() / df_gt['meta'].sum() * 100)
-    es_global = (df_es['logro'].sum() / df_es['meta'].sum() * 100)
-    
-    # HN - ACNUR
-    df_hn_acnur = df_hn[df_hn['programa'] == 'ACNUR']
-    hn_acnur_global = (df_hn_acnur['logro'].sum() / df_hn_acnur['meta'].sum() * 100) if len(df_hn_acnur) > 0 else 0
-    
-    # HN - PMA
-    df_hn_pma = df_hn[df_hn['programa'] == 'PMA']
-    hn_pma_global = (df_hn_pma['logro'].sum() / df_hn_pma['meta'].sum() * 100) if len(df_hn_pma) > 0 else 0
-    
-    st.metric("🇬🇹 Guatemala", f"{gt_global:.1f}%")
-    st.metric("🇸🇻 El Salvador", f"{es_global:.1f}%")
-    st.metric("🇭🇳 Honduras - ACNUR", f"{hn_acnur_global:.1f}%")
-    st.metric("🇭🇳 Honduras - PMA", f"{hn_pma_global:.1f}%")
-    
-    st.markdown("---")
-    st.caption("🗺️ Haz clic en cualquier municipio del mapa para ver sus detalles")
 
-# ============ MAPA ============
-st.subheader("🗺️ Mapa de Intervención")
+# ============================================
+# INFORMACIÓN
+# ============================================
+with st.expander("ℹ️ Información del Dashboard"):
+    st.markdown(f"""
+    **Resumen General:**
+    - Total licitaciones: {len(df_filtrado)}
+    - Monto total: Q{df_filtrado['monto_adjudicado'].sum():,.2f}
+    - Monto promedio: Q{df_filtrado['monto_adjudicado'].mean():,.2f}
+    - Proveedores distintos: {df_filtrado['proveedor_ganador'].nunique()}
+    - Departamentos: {df_filtrado['departamento'].nunique()}
+    - Regiones: {df_filtrado['region'].nunique()}
+    
+    **Columnas disponibles:**
+    - NOG, Descripción, Región, Departamento, Municipio
+    - Tipo de Proyecto, Estatus, Monto Adjudicado
+    - Proveedor Ganador, Número de Ofertas, Fechas
+    """)
 
-# Crear y mostrar mapa
-mapa = crear_mapa(pais_filtro, programa_filtro)
-folium_static(mapa, width=None, height=600)
-
-# ============ DETALLE DEL MUNICIPIO SELECCIONADO ============
 st.markdown("---")
-st.subheader("📋 Detalle del Municipio Seleccionado")
-
-# Estado para mantener el municipio seleccionado
-if 'municipio_seleccionado' not in st.session_state:
-    st.session_state.municipio_seleccionado = None
-
-# Mostrar detalle
-mostrar_detalle_municipio(st.session_state.municipio_seleccionado)
-
-# ============ DATOS DEL PROYECTO POR PAÍS ============
-st.markdown("---")
-st.subheader("📊 Datos de Proyectos por País")
-
-# Pestañas para mostrar datos de proyectos
-tab1, tab2, tab3 = st.tabs(["🇬🇹 Guatemala", "🇸🇻 El Salvador", "🇭🇳 Honduras"])
-
-with tab1:
-    st.header("🇬🇹 Guatemala")
-    st.caption("Período: Mayo - Noviembre 2026")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        pct = df_gt[df_gt['categoria']=='WASH']['% Cumplimiento'].mean()
-        st.metric("WASH (29%)", f"{pct:.0f}%")
-    with col2:
-        pct = df_gt[df_gt['categoria']=='Protección Niñez']['% Cumplimiento'].mean()
-        st.metric("Niñez (10%)", f"{pct:.0f}%")
-    with col3:
-        pct = df_gt[df_gt['categoria']=='VBG']['% Cumplimiento'].mean()
-        st.metric("VBG (3%)", f"{pct:.0f}%")
-    with col4:
-        pct = df_gt[df_gt['categoria']=='Seguridad Alimentaria']['% Cumplimiento'].mean()
-        st.metric("Seg. Alim (58%)", f"{pct:.0f}%")
-    
-    mostrar_tabla_indicadores(df_gt, 'Guatemala')
-    mostrar_alertas(df_gt)
-
-with tab2:
-    st.header("🇸🇻 El Salvador")
-    st.caption("Período: Mayo - Noviembre 2026")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        pct = df_es[df_es['categoria']=='WASH']['% Cumplimiento'].mean()
-        st.metric("WASH (25%)", f"{pct:.0f}%")
-    with col2:
-        pct = df_es[df_es['categoria']=='Protección']['% Cumplimiento'].mean()
-        st.metric("Protección (4%)", f"{pct:.0f}%")
-    with col3:
-        pct = df_es[df_es['categoria']=='VBG']['% Cumplimiento'].mean()
-        st.metric("VBG (4%)", f"{pct:.0f}%")
-    with col4:
-        pct = df_es[df_es['categoria']=='Protección Niñez']['% Cumplimiento'].mean()
-        st.metric("Niñez (11%)", f"{pct:.0f}%")
-    with col5:
-        pct = df_es[df_es['categoria']=='Seguridad Alimentaria']['% Cumplimiento'].mean()
-        st.metric("Seg. Alim (56%)", f"{pct:.0f}%")
-    
-    mostrar_tabla_indicadores(df_es, 'El Salvador')
-    mostrar_alertas(df_es)
-
-with tab3:
-    st.header("🇭🇳 Honduras")
-    st.caption("Período: Mayo - Octubre 2026")
-    
-    # Selector de programa para HN
-    hn_programa = st.radio(
-        "📂 Seleccionar Programa",
-        options=['Todos', 'ACNUR', 'PMA'],
-        horizontal=True
-    )
-    
-    # Mostrar según programa seleccionado
-    if hn_programa == 'ACNUR' or hn_programa == 'Todos':
-        st.subheader("🔵 ACNUR")
-        df_hn_acnur = df_hn[df_hn['programa'] == 'ACNUR']
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            pct = df_hn_acnur[df_hn_acnur['categoria']=='Gestión de Casos']['% Cumplimiento'].mean()
-            st.metric("Gestión Casos", f"{pct:.0f}%")
-        with col2:
-            pct = df_hn_acnur[df_hn_acnur['categoria']=='SMAPS']['% Cumplimiento'].mean()
-            st.metric("SMAPS", f"{pct:.0f}%")
-        with col3:
-            pct = df_hn_acnur[df_hn_acnur['categoria']=='Entrega de Kits']['% Cumplimiento'].mean()
-            st.metric("Kits", f"{pct:.0f}%")
-        with col4:
-            pct = df_hn_acnur[df_hn_acnur['categoria']=='Fortalecimiento Liderazgo']['% Cumplimiento'].mean()
-            st.metric("Liderazgo", f"{pct:.0f}%")
-        
-        mostrar_tabla_indicadores(df_hn_acnur, 'Honduras', 'ACNUR')
-        mostrar_alertas(df_hn_acnur, 'ACNUR')
-        st.markdown("---")
-    
-    if hn_programa == 'PMA' or hn_programa == 'Todos':
-        st.subheader("🟢 PMA")
-        df_hn_pma = df_hn[df_hn['programa'] == 'PMA']
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            pct = df_hn_pma[df_hn_pma['categoria']=='Objetivo 1']['% Cumplimiento'].mean()
-            st.metric("Objetivo 1 (Sensibilización)", f"{pct:.0f}%")
-        with col2:
-            pct = df_hn_pma[df_hn_pma['categoria']=='Objetivo 2']['% Cumplimiento'].mean()
-            st.metric("Objetivo 2 (Acompañamiento)", f"{pct:.0f}%")
-        with col3:
-            pct = df_hn_pma[df_hn_pma['categoria']=='Objetivo 3']['% Cumplimiento'].mean()
-            st.metric("Objetivo 3 (Monitoreo)", f"{pct:.0f}%")
-        
-        mostrar_tabla_indicadores(df_hn_pma, 'Honduras', 'PMA')
-        mostrar_alertas(df_hn_pma, 'PMA')
-
-# ============ FOOTER ============
-st.markdown("---")
-st.caption("📅 Datos simulados - Última actualización: 30 de julio 2026")
-st.caption("💡 GT y ES: Mayo - Noviembre 2026 | HN: Mayo - Octubre 2026")
-st.caption("🔵 ACNUR | 🟢 PMA | 👆 Haz clic en los municipios del mapa para ver detalles")
+st.markdown(f"📅 Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
